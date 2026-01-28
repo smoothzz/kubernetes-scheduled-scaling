@@ -1,0 +1,18 @@
+apiVersion: scaling.kubernetes.io/v1alpha1
+kind: ScheduledScaling
+metadata:
+  name: scale-up-production-morning
+  namespace: default
+spec:
+  targetRef:
+    apiVersion: autoscaling/v2
+    kind: HorizontalPodAutoscaler
+    name: test-app
+    namespace: default
+  schedule:
+    startTime: "2024-01-15T10:00:00Z"
+    endTime: "2024-01-15T18:00:00Z"
+  scaling:
+    minReplicas: 5
+    maxReplicas: 10
+  revert: true

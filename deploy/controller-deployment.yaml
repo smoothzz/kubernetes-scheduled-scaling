@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scheduledscaling-controller
+  namespace: default
+  labels:
+    app: scheduledscaling-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scheduledscaling-controller
+  template:
+    metadata:
+      labels:
+        app: scheduledscaling-controller
+    spec:
+      serviceAccountName: scheduledscaling-controller
+      containers:
+      - name: controller
+        image: scheduledscaling-controller:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        - --leader-elect
+        ports:
+        - containerPort: 8080
+          name: metrics
+        - containerPort: 8081
+          name: health
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi

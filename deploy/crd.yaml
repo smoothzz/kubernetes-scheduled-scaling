@@ -1,0 +1,128 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: scheduledscalings.scaling.kubernetes.io
+  annotations:
+    api-approved.kubernetes.io: "unapproved"
+spec:
+  group: scaling.kubernetes.io
+  versions:
+  - name: v1alpha1
+    served: true
+    storage: true
+    additionalPrinterColumns:
+    - name: Status
+      type: string
+      description: The current phase of the scheduled scaling
+      jsonPath: .status.phase
+    - name: Age
+      type: date
+      description: Creation timestamp
+      jsonPath: .metadata.creationTimestamp
+    schema:
+      openAPIV3Schema:
+        type: object
+        properties:
+          spec:
+            type: object
+            required:
+            - targetRef
+            - schedule
+            - scaling
+            properties:
+              targetRef:
+                type: object
+                required:
+                - kind
+                - name
+                properties:
+                  apiVersion:
+                    type: string
+                    default: autoscaling/v2
+                  kind:
+                    type: string
+                    enum:
+                    - HorizontalPodAutoscaler
+                    - ScaledObject
+                  name:
+                    type: string
+                  namespace:
+                    type: string
+              schedule:
+                type: object
+                properties:
+                  startTime:
+                    type: string
+                    format: date-time
+                  endTime:
+                    type: string
+                    format: date-time
+                  recurrence:
+                    type: object
+                    properties:
+                      schedule:
+                        type: string
+                        description: "Kubernetes cron schedule (e.g., '0 17 * * 1' for every Monday at 5pm)"
+                      duration:
+                        type: string
+                        description: "Duration the scaling should remain active (e.g., '3h', '30m')"
+                      timezone:
+                        type: string
+                        description: "Timezone for the cron schedule (e.g., 'America/New_York', 'UTC')"
+                      startingDeadlineSeconds:
+                        type: integer
+                        description: "Deadline in seconds for starting the job if it misses scheduled time"
+                      successfulJobsHistoryLimit:
+                        type: integer
+                        description: "Number of successful finished jobs to retain"
+                      failedJobsHistoryLimit:
+                        type: integer
+                        description: "Number of failed finished jobs to retain"
+                    required:
+                    - schedule
+                    - duration
+              scaling:
+                type: object
+                properties:
+                  minReplicas:
+                    type: integer
+                    minimum: 0
+                  maxReplicas:
+                    type: integer
+                    minimum: 1
+              revert:
+                type: boolean
+                default: true
+          status:
+            type: object
+            properties:
+              phase:
+                type: string
+                enum:
+                - Pending
+                - Active
+                - Completed
+                - Failed
+                - Cancelled
+                - Recurring
+              appliedAt:
+                type: string
+                format: date-time
+              revertedAt:
+                type: string
+                format: date-time
+              originalMinReplicas:
+                type: integer
+              originalMaxReplicas:
+                type: integer
+              message:
+                type: string
+    subresources:
+      status: {}
+  scope: Namespaced
+  names:
+    plural: scheduledscalings
+    singular: scheduledscaling
+    kind: ScheduledScaling
+    shortNames:
+    - ss

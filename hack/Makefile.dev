@@ -1,0 +1,138 @@
+.PHONY: all build import restart port-forward stop-port-forward clean status logs-controller logs-api logs-frontend help
+
+# Default cluster name
+CLUSTER_NAME ?= scaling-cluster
+
+# Image names
+CONTROLLER_IMAGE ?= scheduledscaling-controller:latest
+API_IMAGE ?= scheduledscaling-api:latest
+FRONTEND_IMAGE ?= scheduledscaling-frontend:latest
+
+# Port forward ports
+API_PORT ?= 8081
+FRONTEND_PORT ?= 8080
+
+help:
+	@echo "Kubernetes Scheduled Scaling - Development Makefile"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all          - Build images, import to k3d, restart deployments, and start port-forwards"
+	@echo "  build        - Build all Docker images"
+	@echo "  import       - Import images into k3d cluster"
+	@echo "  restart      - Restart all deployments"
+	@echo "  port-forward - Start port-forwards for API and Frontend"
+	@echo "  clean        - Stop port-forwards and clean up"
+	@echo ""
+	@echo "Variables:"
+	@echo "  CLUSTER_NAME=$(CLUSTER_NAME)"
+	@echo "  API_PORT=$(API_PORT)"
+	@echo "  FRONTEND_PORT=$(FRONTEND_PORT)"
+
+all: build import restart port-forward
+	@echo ""
+	@echo "✅ All done! Services are available at:"
+	@echo "  - Frontend: http://localhost:$(FRONTEND_PORT)"
+	@echo "  - API: http://localhost:$(API_PORT)"
+	@echo ""
+	@echo "Port-forwards are running in the background."
+	@echo "Use 'make clean' to stop them."
+
+build:
+	@echo "🔨 Building Docker images..."
+	docker build -f Dockerfile.controller -t $(CONTROLLER_IMAGE) .
+	docker build -f Dockerfile.api -t $(API_IMAGE) .
+	docker build -f Dockerfile.frontend -t $(FRONTEND_IMAGE) .
+	@echo "✅ Build complete!"
+
+import: build
+	@echo "📦 Importing images into k3d cluster '$(CLUSTER_NAME)'..."
+	@k3d image import $(CONTROLLER_IMAGE) -c $(CLUSTER_NAME) || (echo "❌ Failed to import controller image" && exit 1)
+	@k3d image import $(API_IMAGE) -c $(CLUSTER_NAME) || (echo "❌ Failed to import API image" && exit 1)
+	@k3d image import $(FRONTEND_IMAGE) -c $(CLUSTER_NAME) || (echo "❌ Failed to import frontend image" && exit 1)
+	@echo "✅ Images imported successfully!"
+
+restart: import
+	@echo "🔄 Restarting deployments..."
+	@kubectl rollout restart deployment/scheduledscaling-controller deployment/scheduledscaling-api deployment/scheduledscaling-frontend || (echo "❌ Failed to restart deployments" && exit 1)
+	@echo "⏳ Waiting for deployments to be ready..."
+	@kubectl rollout status deployment/scheduledscaling-controller --timeout=120s || (echo "⚠️  Controller deployment timeout" && exit 1)
+	@kubectl rollout status deployment/scheduledscaling-api --timeout=60s || (echo "⚠️  API deployment timeout" && exit 1)
+	@kubectl rollout status deployment/scheduledscaling-frontend --timeout=60s || (echo "⚠️  Frontend deployment timeout" && exit 1)
+	@echo "✅ All deployments are ready!"
+
+port-forward:
+	@echo "🌐 Starting port-forwards..."
+	@if pgrep -f "kubectl port-forward.*scheduledscaling-api" > /dev/null 2>&1 && pgrep -f ".*$(API_PORT):80" > /dev/null 2>&1; then \
+		echo "⚠️  API port-forward already running on port $(API_PORT)"; \
+	else \
+		echo "🚀 Starting API port-forward on port $(API_PORT)..."; \
+		(kubectl port-forward service/scheduledscaling-api $(API_PORT):80 > /tmp/k8s-api-portforward.log 2>&1 &) && \
+		sleep 2 && \
+		if pgrep -f "kubectl port-forward.*scheduledscaling-api" > /dev/null 2>&1; then \
+			echo "✅ API port-forward started on port $(API_PORT)"; \
+		else \
+			echo "❌ Failed to start API port-forward. Check logs: /tmp/k8s-api-portforward.log"; \
+			cat /tmp/k8s-api-portforward.log 2>/dev/null || true; \
+		fi; \
+	fi
+	@if pgrep -f "kubectl port-forward.*scheduledscaling-frontend" > /dev/null 2>&1 && pgrep -f ".*$(FRONTEND_PORT):80" > /dev/null 2>&1; then \
+		echo "⚠️  Frontend port-forward already running on port $(FRONTEND_PORT)"; \
+	else \
+		echo "🚀 Starting Frontend port-forward on port $(FRONTEND_PORT)..."; \
+		(kubectl port-forward service/scheduledscaling-frontend $(FRONTEND_PORT):80 > /tmp/k8s-frontend-portforward.log 2>&1 &) && \
+		sleep 2 && \
+		if pgrep -f "kubectl port-forward.*scheduledscaling-frontend" > /dev/null 2>&1; then \
+			echo "✅ Frontend port-forward started on port $(FRONTEND_PORT)"; \
+		else \
+			echo "❌ Failed to start Frontend port-forward. Check logs: /tmp/k8s-frontend-portforward.log"; \
+			cat /tmp/k8s-frontend-portforward.log 2>/dev/null || true; \
+		fi; \
+	fi
+	@sleep 1
+	@echo ""
+	@echo "📍 Port-forwards:"
+	@echo "  - Frontend: http://localhost:$(FRONTEND_PORT)"
+	@echo "  - API: http://localhost:$(API_PORT)"
+
+stop-port-forward:
+	@echo "🛑 Stopping port-forwards..."
+	@pkill -f "kubectl port-forward.*scheduledscaling-api" 2>/dev/null || true
+	@pkill -f "kubectl port-forward.*scheduledscaling-frontend" 2>/dev/null || true
+	@sleep 1
+	@rm -f /tmp/k8s-api-portforward.log /tmp/k8s-frontend-portforward.log 2>/dev/null || true
+	@echo "✅ Port-forwards stopped"
+
+clean: stop-port-forward
+	@echo "🧹 Cleanup complete"
+
+status:
+	@echo "📊 Deployment Status:"
+	@kubectl get deployments -l 'app in (scheduledscaling-controller,scheduledscaling-api,scheduledscaling-frontend)'
+	@echo ""
+	@echo "📦 Pod Status:"
+	@kubectl get pods -l 'app in (scheduledscaling-controller,scheduledscaling-api,scheduledscaling-frontend)'
+	@echo ""
+	@echo "🌐 Port-forward Status:"
+	@if pgrep -f "kubectl port-forward.*scheduledscaling-api" > /dev/null 2>&1; then \
+		API_PID=$$(pgrep -f "kubectl port-forward.*scheduledscaling-api" | head -1); \
+		API_CMD=$$(ps -p $$API_PID -o command= 2>/dev/null | grep -o '[0-9]*:80' | cut -d: -f1); \
+		echo "  ✅ API port-forward: running on port $${API_CMD:-$(API_PORT)} (PID: $$API_PID)"; \
+	else \
+		echo "  ❌ API port-forward: not running"; \
+	fi
+	@if pgrep -f "kubectl port-forward.*scheduledscaling-frontend" > /dev/null 2>&1; then \
+		FRONTEND_PID=$$(pgrep -f "kubectl port-forward.*scheduledscaling-frontend" | head -1); \
+		FRONTEND_CMD=$$(ps -p $$FRONTEND_PID -o command= 2>/dev/null | grep -o '[0-9]*:80' | cut -d: -f1); \
+		echo "  ✅ Frontend port-forward: running on port $${FRONTEND_CMD:-$(FRONTEND_PORT)} (PID: $$FRONTEND_PID)"; \
+	else \
+		echo "  ❌ Frontend port-forward: not running"; \
+	fi
+
+logs-controller:
+	@kubectl logs -f -l app=scheduledscaling-controller
+
+logs-api:
+	@kubectl logs -f -l app=scheduledscaling-api
+
+logs-frontend:
+	@kubectl logs -f -l app=scheduledscaling-frontend

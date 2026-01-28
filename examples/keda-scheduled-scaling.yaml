@@ -1,0 +1,18 @@
+apiVersion: scaling.kubernetes.io/v1alpha1
+kind: ScheduledScaling
+metadata:
+  name: scale-up-keda-test
+  namespace: default
+spec:
+  targetRef:
+    apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    name: keda-test-app
+    namespace: default
+  schedule:
+    startTime: "2026-01-28T10:00:00Z"
+    endTime: "2026-01-28T18:00:00Z"
+  scaling:
+    minReplicas: 5
+    maxReplicas: 15
+  revert: true
